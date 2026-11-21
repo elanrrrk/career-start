@@ -1,0 +1,69 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.md {
+  min-height: 44px;
+  padding: 8px 20px;
+  font-size: 16px;
+}
+
+.lg {
+  min-height: 52px;
+  padding: 12px 44px;
+  font-size: 18px;
+}
+
+.filled {
+  background: var(--color-btn-neutral);
+  color: #fff;
+}
+.filled:hover {
+  background: var(--color-btn-neutral-hover);
+}
+
+.light {
+  background: #fff;
+  color: #000;
+}
+.light:hover {
+  background: #e9e6f0;
+}
+
+.outline {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.55);
+  color: rgba(255, 255, 255, 0.9);
+}
+.outline:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Ссылка-кнопка: сбрасываем размеры, заданные .md/.lg */
+.button.link {
+  min-height: 0;
+  padding: 2px 0;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  border-radius: 0;
+  background: none;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.uppercase {
+  text-transform: uppercase;
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

@@ -1,0 +1,78 @@
+.header {
+  position: fixed;
+  top: var(--header-offset);
+  left: 0;
+  right: 0;
+  z-index: 100;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--header-height);
+  padding-inline: clamp(16px, 2.5vw, 28px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: rgba(16, 14, 20, 0.75);
+  backdrop-filter: blur(12px);
+}
+
+.links {
+  display: flex;
+  gap: clamp(24px, 6vw, 96px);
+  padding: 0;
+  list-style: none;
+}
+
+.right {
+  display: flex;
+  align-items: center;
+  gap: clamp(24px, 8vw, 120px);
+  margin-left: auto;
+}
+
+.link {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.85);
+  transition: color 0.2s;
+}
+
+.link:hover,
+.active {
+  color: #fff;
+}
+
+.profile {
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.profile:hover {
+  color: #fff;
+}
+
+/* На мобильных основную навигацию потом заменит бургер-меню */
+@media (max-width: 720px) {
+  .links {
+    display: none;
+  }
+}
+
+/* Светлая тема (страницы входа и регистрации) */
+.light .bar {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.light .link,
+.light .profile {
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.light .link:hover,
+.light .active,
+.light .profile:hover {
+  color: #000;
+}

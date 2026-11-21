@@ -1,0 +1,31 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+}
+
+.forgot {
+  margin-top: -12px;
+  font-size: 11px;
+  text-align: left;
+  color: var(--color-text-subtle);
+}
+
+.forgot a {
+  color: #fff;
+}
+
+.forgot a:hover {
+  text-decoration: underline;
+}
+
+.serverError {
+  font-size: 13px;
+  color: var(--color-error-text);
+}
+
+.submit {
+  margin-top: 12px;
+  font-size: 14px;
+}

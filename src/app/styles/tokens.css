@@ -1,0 +1,61 @@
+/* Дизайн-токены. Все цвета, шрифты и размеры берутся отсюда.
+   Шрифты временные: замените на те, что указаны в Figma (Inspect). */
+:root {
+  /* Цвета */
+  --color-bg: #000;
+  --color-text: #fff;
+  --color-text-muted: rgba(255, 255, 255, 0.78);
+  --color-text-subtle: rgba(255, 255, 255, 0.5);
+  --color-border: rgba(255, 255, 255, 0.08);
+
+  --color-accent: #8b5cf6;
+  --color-accent-strong: #6d28d9;
+  --color-accent-deep: #4c1d95;
+  --color-accent-soft: #c4b5fd;
+  --color-accent-text: #9b6cf0;
+  --color-link-on-glow: #3b0a8a;
+
+  --color-danger: #be123c;
+  --color-error-text: #fda4af;
+  --color-success: #2f9e7a;
+  --color-btn-neutral: #8f8f8f;
+  --color-btn-neutral-hover: #a3a3a3;
+
+  /* Фоны секций */
+  --bg-hero:
+    radial-gradient(ellipse 45% 45% at 8% 105%, #e3d5ff 0%, #a78bfa 30%, transparent 70%),
+    radial-gradient(ellipse 110% 75% at 45% 110%, #6d28d9 0%, transparent 70%),
+    radial-gradient(ellipse 60% 70% at 95% 90%, #4c1d95 0%, transparent 70%),
+    #000;
+  --bg-glow:
+    radial-gradient(ellipse 55% 40% at 50% 108%, #efe6ff 0%, #b79cff 30%, transparent 70%),
+    radial-gradient(ellipse 120% 80% at 50% 105%, #7c3aed 0%, #4c1d95 45%, transparent 78%),
+    linear-gradient(180deg, #000 0%, #0b0314 35%, #2a0a5e 100%);
+  --bg-dark:
+    radial-gradient(ellipse 80% 60% at 70% 0%, rgba(76, 29, 149, 0.35), transparent 70%),
+    linear-gradient(160deg, #0a0414 0%, #140a24 100%);
+  --bg-dark-glow:
+    radial-gradient(circle at 0% 100%, rgba(124, 58, 237, 0.55) 0%, transparent 22%),
+    radial-gradient(circle at 100% 100%, rgba(124, 58, 237, 0.45) 0%, transparent 20%),
+    radial-gradient(circle at 85% 15%, rgba(67, 56, 202, 0.35) 0%, transparent 25%),
+    #050307;
+  --bg-auth:
+    radial-gradient(ellipse 70% 25% at 50% -5%, #c9b6ff 0%, transparent 70%),
+    linear-gradient(180deg, #9a7bff 0%, #6f4ae6 12%, #4318b8 30%, #1b0752 55%, #000 80%);
+
+  /* Типографика */
+  --font-heading: "Montserrat", system-ui, sans-serif;
+  --font-body: "Manrope", system-ui, sans-serif;
+
+  /* Скругления */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  /* Сетка */
+  --container-width: 1200px;
+  --container-padding: clamp(16px, 4vw, 48px);
+  --header-height: 60px;
+  --header-offset: 16px;
+}

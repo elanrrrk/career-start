@@ -1,0 +1,91 @@
+server:
+  port: ${PORT:8080}
+
+spring:
+  application:
+    name: backend-api
+  profiles:
+    active: dev
+
+  datasource:
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    open-in-view: false
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+springdoc:
+  api-docs:
+    path: /api/v1/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+    access-expiration-ms: ${JWT_ACCESS_EXP_MS:900000}
+    refresh-expiration-ms: ${JWT_REFRESH_EXP_MS:604800000}
+  api-base-url: ${API_BASE_URL:http://localhost:8080/api/v1}
+
+---
+# Профиль разработки (dev)
+spring:
+  config:
+    activate:
+      on-profile: dev
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://127.0.0.1:5432/platform_db}
+    username: ${DB_USER:postgres}
+    password: ${DB_PASS:devpass123}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+app:
+  cors:
+    allowed-origins: "http://localhost:3000,http://localhost:5173"
+
+---
+# Профиль предпродакшн-тестирования (staging)
+spring:
+  config:
+    activate:
+      on-profile: staging
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://staging-db.internal:5432/platform_staging}
+    username: ${DB_USER:staging_user}
+    password: ${DB_PASS:staging_secret_pass}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+app:
+  cors:
+    allowed-origins: "https://staging.platform.local"
+
+---
+# Продакшн-профиль (prod)
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://prod-db.internal:5432/platform_prod}
+    username: ${DB_USER:prod_user}
+    password: ${DB_PASS:prod_secure_password}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+app:
+  cors:
+    allowed-origins: "https://platform.com"

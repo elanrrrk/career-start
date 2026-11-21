@@ -1,0 +1,16 @@
+.card {
+  display: flex;
+  align-items: center;
+  min-height: 46px;
+  padding: 10px 18px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, rgba(109, 40, 217, 0.55) 0%, rgba(76, 29, 149, 0.2) 100%);
+  box-shadow: 0 0 24px rgba(124, 58, 237, 0.25);
+  color: var(--color-text-muted);
+  transition: color 0.2s, box-shadow 0.2s;
+}
+
+.card:hover {
+  color: #fff;
+  box-shadow: 0 0 28px rgba(124, 58, 237, 0.45);
+}

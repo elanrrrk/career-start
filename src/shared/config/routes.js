@@ -1,0 +1,15 @@
+export const ROUTES = {
+  home: "/",
+  about: "/about",
+  blog: "/blog",
+  directions: "/directions",
+  partners: "/partners",
+  companies: "/companies",
+  profile: "/profile",
+  login: "/login",
+  register: "/register",
+  forgotPassword: "/forgot-password",
+  offer: "/offer",
+  privacy: "/privacy",
+  profession: (slug) => `/professions/${slug}`,
+};

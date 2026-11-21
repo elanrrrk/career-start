@@ -1,0 +1,41 @@
+/* Вступление */
+.intro {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.introText {
+  max-width: 480px;
+  margin-top: 24px;
+  font-size: clamp(16px, 1.5vw, 19px);
+  color: var(--color-text-muted);
+}
+
+.startButton {
+  margin-top: 48px;
+}
+
+.skip {
+  margin-top: 20px;
+  color: var(--color-link-on-glow);
+}
+
+/* Результат */
+.result {
+  max-width: 560px;
+}
+
+.resultText {
+  max-width: 380px;
+  margin-top: 28px;
+  font-size: clamp(16px, 1.4vw, 18px);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 48px;
+}

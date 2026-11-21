@@ -1,0 +1,89 @@
+.intro {
+  max-width: 480px;
+  margin-top: 24px;
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--color-text-muted);
+}
+
+.divider {
+  width: min(320px, 60%);
+  height: 1px;
+  margin-top: 32px;
+  background: linear-gradient(90deg, transparent, rgba(139, 92, 246, 0.8), transparent);
+}
+
+.subtitle {
+  margin-top: clamp(40px, 8vh, 72px);
+  font-size: clamp(20px, 2vw, 26px);
+  font-weight: 300;
+  color: var(--color-text-muted);
+}
+
+.timeline {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 32px;
+  margin-top: 56px;
+  padding: 0;
+  list-style: none;
+}
+
+/* Горизонтальная линия через центры иконок */
+.timeline::before {
+  content: "";
+  position: absolute;
+  top: 34px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(120, 140, 220, 0.7), rgba(139, 92, 246, 0.7));
+}
+
+.step {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.iconBox {
+  display: grid;
+  place-items: center;
+  width: 68px;
+  height: 68px;
+  border-radius: var(--radius-md);
+  background: #0d0b1f;
+}
+
+.stepTitle {
+  margin-top: 20px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.stepText {
+  max-width: 200px;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--color-text-subtle);
+}
+
+@media (max-width: 860px) {
+  .timeline {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 48px;
+  }
+
+  .timeline::before {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .timeline {
+    grid-template-columns: 1fr;
+  }
+}

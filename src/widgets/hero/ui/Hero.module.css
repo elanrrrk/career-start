@@ -1,0 +1,15 @@
+.inner {
+  display: flex;
+  flex-direction: column;
+}
+
+.title {
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.tabs {
+  align-self: flex-end;
+  width: min(100%, 380px);
+  margin-top: clamp(48px, 14vh, 140px);
+}

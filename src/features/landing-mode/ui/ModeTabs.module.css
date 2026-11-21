@@ -1,0 +1,24 @@
+.tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
+}
+
+.tab {
+  padding: 14px 24px;
+  border: 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.5);
+  background: none;
+  font-size: clamp(18px, 1.8vw, 22px);
+  font-weight: 300;
+  color: rgba(255, 255, 255, 0.75);
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.tab:hover {
+  color: #fff;
+}
+
+.active {
+  color: #fff;
+  border-bottom: 2px solid #fff;
+}

@@ -1,0 +1,52 @@
+.form {
+  display: flex;
+  flex-direction: column;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  border: 1px solid rgba(139, 92, 246, 0.6);
+  border-radius: var(--radius-sm);
+  background: rgba(10, 8, 20, 0.6);
+  transition: border-color 0.2s;
+}
+
+.field:focus-within {
+  border-color: var(--color-accent-soft);
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  padding: 11px 18px;
+  border: 0;
+  background: none;
+  outline: none;
+}
+
+.input::placeholder {
+  color: var(--color-text-subtle);
+}
+
+.submit {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 44px;
+  border: 0;
+  background: none;
+  color: var(--color-text-subtle);
+  transition: color 0.2s;
+}
+
+.submit:hover {
+  color: #fff;
+}
+
+.status {
+  min-height: 20px;
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--color-accent-soft);
+}

@@ -1,0 +1,13 @@
+.content {
+  max-width: 480px;
+}
+
+.text {
+  margin-top: 20px;
+  font-size: clamp(16px, 1.4vw, 18px);
+  color: var(--color-text-muted);
+}
+
+.button {
+  margin-top: 36px;
+}

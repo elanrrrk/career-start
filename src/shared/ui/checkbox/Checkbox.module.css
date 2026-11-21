@@ -1,0 +1,35 @@
+.label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: left;
+  color: var(--color-text-subtle);
+  cursor: pointer;
+}
+
+.label a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.label a:hover {
+  color: #fff;
+}
+
+.box {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  margin: 1px 0 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.error {
+  margin-top: 6px;
+  font-size: 12px;
+  text-align: left;
+  color: var(--color-error-text);
+}

@@ -1,0 +1,22 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.serverError {
+  font-size: 13px;
+  color: var(--color-error-text);
+}
+
+.submit {
+  margin-top: 4px;
+  font-size: 14px;
+}

@@ -1,0 +1,14 @@
+.link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-top: 32px;
+  padding: 8px 20px;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: var(--radius-sm);
+  transition: background-color 0.2s;
+}
+
+.link:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
