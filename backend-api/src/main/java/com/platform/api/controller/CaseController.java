@@ -5,11 +5,13 @@ import com.platform.api.dto.CaseResponse;
 import com.platform.api.dto.PageResponse;
 import com.platform.api.entity.Case;
 import com.platform.api.entity.User;
+import com.platform.api.event.AuditEvent;
 import com.platform.api.repository.CaseRepository;
 import com.platform.api.repository.UserRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -32,10 +34,16 @@ public class CaseController {
 
     private final CaseRepository caseRepository;
     private final UserRepository userRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
-    public CaseController(CaseRepository caseRepository, UserRepository userRepository) {
+    public CaseController(
+            CaseRepository caseRepository,
+            UserRepository userRepository,
+            ApplicationEventPublisher eventPublisher
+    ) {
         this.caseRepository = caseRepository;
         this.userRepository = userRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     @Operation(summary = "Получить каталог кейсов с пагинацией и поиском")
@@ -96,6 +104,15 @@ public class CaseController {
         Case c = new Case(req.title(), req.description(), req.category(), req.tags(), req.timeLimitMinutes(), author);
         caseRepository.save(c);
 
+        // Аудит создания кейса
+        eventPublisher.publishEvent(new AuditEvent(
+                authorId,
+                "CREATE_CASE",
+                "Case",
+                c.getId().toString(),
+                "Создан кейс: \"" + c.getTitle() + "\", категория: " + c.getCategory()
+        ));
+
         return ResponseEntity.status(HttpStatus.CREATED).body(mapToResponse(c));
     }
 
@@ -105,12 +122,13 @@ public class CaseController {
     public ResponseEntity<CaseResponse> updateCase(
         @PathVariable UUID id,
         @Valid @RequestBody CaseRequest req,
-        @RequestParam Long version
+        @RequestParam Long version,
+        Authentication authentication
     ) {
+        UUID actorId = UUID.fromString((String) authentication.getPrincipal());
         Case c = caseRepository.findById(id)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Кейс не найден"));
 
-        // Валидация оптимистической блокировки
         if (!Objects.equals(c.getVersion(), version)) {
             throw new ResponseStatusException(
                 HttpStatus.CONFLICT,
@@ -126,29 +144,59 @@ public class CaseController {
 
         caseRepository.save(c);
 
+        // Аудит обновления кейса
+        eventPublisher.publishEvent(new AuditEvent(
+                actorId,
+                "UPDATE_CASE",
+                "Case",
+                c.getId().toString(),
+                "Кейс обновлен до версии " + c.getVersion()
+        ));
+
         return ResponseEntity.ok(mapToResponse(c));
     }
 
     @Operation(summary = "Удалить кейс (только EXPERT или ADMIN)")
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAnyRole('EXPERT', 'ADMIN')")
-    public ResponseEntity<Void> deleteCase(@PathVariable UUID id) {
-        if (!caseRepository.existsById(id)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Кейс не найден");
-        }
+    public ResponseEntity<Void> deleteCase(@PathVariable UUID id, Authentication authentication) {
+        UUID actorId = UUID.fromString((String) authentication.getPrincipal());
+        Case c = caseRepository.findById(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Кейс не найден"));
+
         caseRepository.deleteById(id);
+
+        // Аудит удаления кейса
+        eventPublisher.publishEvent(new AuditEvent(
+                actorId,
+                "DELETE_CASE",
+                "Case",
+                id.toString(),
+                "Удален кейс: " + c.getTitle()
+        ));
+
         return ResponseEntity.noContent().build();
     }
 
     @Operation(summary = "Опубликовать кейс (только EXPERT или ADMIN)")
     @PatchMapping("/{id}/publish")
     @PreAuthorize("hasAnyRole('EXPERT', 'ADMIN')")
-    public ResponseEntity<CaseResponse> publishCase(@PathVariable UUID id) {
+    public ResponseEntity<CaseResponse> publishCase(@PathVariable UUID id, Authentication authentication) {
+        UUID actorId = UUID.fromString((String) authentication.getPrincipal());
         Case c = caseRepository.findById(id)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Кейс не найден"));
 
         c.setPublished(true);
         caseRepository.save(c);
+
+        // Аудит публикации кейса
+        eventPublisher.publishEvent(new AuditEvent(
+                actorId,
+                "PUBLISH_CASE",
+                "Case",
+                c.getId().toString(),
+                "Кейс опубликован в общий доступ: " + c.getTitle()
+        ));
 
         return ResponseEntity.ok(mapToResponse(c));
     }

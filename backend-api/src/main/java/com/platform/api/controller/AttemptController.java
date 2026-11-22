@@ -8,12 +8,14 @@ import com.platform.api.entity.Attempt;
 import com.platform.api.entity.AttemptStatus;
 import com.platform.api.entity.Case;
 import com.platform.api.entity.User;
+import com.platform.api.event.AuditEvent;
 import com.platform.api.repository.AttemptRepository;
 import com.platform.api.repository.CaseRepository;
 import com.platform.api.repository.UserRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -38,11 +40,18 @@ public class AttemptController {
     private final AttemptRepository attemptRepository;
     private final CaseRepository caseRepository;
     private final UserRepository userRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
-    public AttemptController(AttemptRepository attemptRepository, CaseRepository caseRepository, UserRepository userRepository) {
+    public AttemptController(
+            AttemptRepository attemptRepository,
+            CaseRepository caseRepository,
+            UserRepository userRepository,
+            ApplicationEventPublisher eventPublisher
+    ) {
         this.attemptRepository = attemptRepository;
         this.caseRepository = caseRepository;
         this.userRepository = userRepository;
+        this.eventPublisher = eventPublisher;
     }
 
     @Operation(summary = "Начать прохождение кейса (POST /cases/{id}/attempts)")
@@ -59,7 +68,6 @@ public class AttemptController {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Нельзя начать неопубликованный кейс");
         }
 
-        // Проверка: если уже есть активная попытка, срок которой не истек, возвращаем её
         Optional<Attempt> activeAttempt = attemptRepository.findByUserIdAndTargetCaseIdAndStatus(userId, caseId, AttemptStatus.IN_PROGRESS);
         if (activeAttempt.isPresent()) {
             Attempt existing = activeAttempt.get();
@@ -68,10 +76,18 @@ public class AttemptController {
             }
         }
 
-        // Фиксация серверного дедлайна на основе timeLimitMinutes кейса
         Instant deadline = Instant.now().plus(targetCase.getTimeLimitMinutes(), ChronoUnit.MINUTES);
         Attempt attempt = new Attempt(targetCase, user, deadline);
         attemptRepository.save(attempt);
+
+        // Аудит начала прохождения кейса
+        eventPublisher.publishEvent(new AuditEvent(
+                userId,
+                "START_ATTEMPT",
+                "Attempt",
+                attempt.getId().toString(),
+                "Начато решение кейса: " + targetCase.getTitle() + ", дедлайн до: " + deadline
+        ));
 
         return ResponseEntity.status(HttpStatus.CREATED).body(mapToResponse(attempt));
     }
@@ -89,7 +105,6 @@ public class AttemptController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Попытка уже сдана или проверена");
         }
 
-        // Проверка серверного дедлайна
         if (Instant.now().isAfter(attempt.getDeadline())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Время на решение кейса истекло");
         }
@@ -107,7 +122,6 @@ public class AttemptController {
         @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
         Authentication authentication
     ) {
-        // Проверка идемпотентности: при повторной отправке того же ключа возвращаем сохраненный результат
         if (idempotencyKey != null && !idempotencyKey.isBlank()) {
             Optional<Attempt> existing = attemptRepository.findByIdempotencyKey(idempotencyKey);
             if (existing.isPresent()) {
@@ -125,7 +139,6 @@ public class AttemptController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Попытка уже была сдана ранее");
         }
 
-        // Серверная валидация дедлайна
         Instant now = Instant.now();
         if (now.isAfter(attempt.getDeadline())) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Дедлайн просрочен. Сдача отклонена сервером.");
@@ -135,6 +148,15 @@ public class AttemptController {
         attempt.setSubmittedAt(now);
         attempt.setIdempotencyKey(idempotencyKey);
         attemptRepository.save(attempt);
+
+        // Аудит сдачи работы
+        eventPublisher.publishEvent(new AuditEvent(
+                attempt.getUser().getId(),
+                "SUBMIT_ATTEMPT",
+                "Attempt",
+                attempt.getId().toString(),
+                "Работа по кейсу \"" + attempt.getTargetCase().getTitle() + "\" успешно сдана"
+        ));
 
         return ResponseEntity.ok(mapToResponse(attempt));
     }
@@ -189,8 +211,10 @@ public class AttemptController {
     @PreAuthorize("hasAnyRole('EXPERT', 'ADMIN')")
     public ResponseEntity<AttemptResponse> reviewSubmission(
         @PathVariable UUID id,
-        @Valid @RequestBody ReviewRequest req
+        @Valid @RequestBody ReviewRequest req,
+        Authentication authentication
     ) {
+        UUID reviewerId = UUID.fromString((String) authentication.getPrincipal());
         Attempt attempt = attemptRepository.findById(id)
             .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Попытка не найдена"));
 
@@ -202,6 +226,15 @@ public class AttemptController {
         attempt.setScore(req.score());
         attempt.setFeedback(req.feedback());
         attemptRepository.save(attempt);
+
+        // Аудит проверки работы экспертом
+        eventPublisher.publishEvent(new AuditEvent(
+                reviewerId,
+                "REVIEW_SUBMISSION",
+                "Attempt",
+                attempt.getId().toString(),
+                "Выставлена оценка: " + req.score() + " баллов за решение кейса " + attempt.getTargetCase().getTitle()
+        ));
 
         return ResponseEntity.ok(mapToResponse(attempt));
     }
@@ -225,7 +258,7 @@ public class AttemptController {
             a.getStatus(),
             a.getAnswers(),
             a.getDeadline(),
-            Instant.now(), // server_time по ТЗ
+            Instant.now(),
             a.getSubmittedAt(),
             a.getScore(),
             a.getFeedback(),

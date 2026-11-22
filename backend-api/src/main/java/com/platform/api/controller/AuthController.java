@@ -3,12 +3,14 @@ package com.platform.api.controller;
 import com.platform.api.dto.*;
 import com.platform.api.entity.Role;
 import com.platform.api.entity.User;
+import com.platform.api.event.AuditEvent;
 import com.platform.api.repository.UserRepository;
 import com.platform.api.security.JwtService;
 import io.jsonwebtoken.Claims;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -27,11 +29,18 @@ public class AuthController {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final ApplicationEventPublisher eventPublisher;
 
-    public AuthController(UserRepository userRepository, PasswordEncoder passwordEncoder, JwtService jwtService) {
+    public AuthController(
+            UserRepository userRepository,
+            PasswordEncoder passwordEncoder,
+            JwtService jwtService,
+            ApplicationEventPublisher eventPublisher
+    ) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.eventPublisher = eventPublisher;
     }
 
     @Operation(summary = "Регистрация нового пользователя")
@@ -44,6 +53,15 @@ public class AuthController {
         Role assignedRole = (req.role() != null) ? req.role() : Role.CLIENT;
         User user = new User(req.email(), passwordEncoder.encode(req.password()), assignedRole);
         userRepository.save(user);
+
+        // Аудит регистрации
+        eventPublisher.publishEvent(new AuditEvent(
+                user.getId(),
+                "REGISTER",
+                "User",
+                user.getId().toString(),
+                "Успешная регистрация аккаунта с ролью " + assignedRole.name()
+        ));
 
         return ResponseEntity.status(HttpStatus.CREATED).body(
             new UserResponse(user.getId(), user.getEmail(), user.getRole(), user.isBlocked(), user.getCreatedAt())
@@ -66,6 +84,15 @@ public class AuthController {
 
         String access = jwtService.generateAccessToken(user.getId(), user.getEmail(), user.getRole().name());
         String refresh = jwtService.generateRefreshToken(user.getId());
+
+        // Аудит успешного входа
+        eventPublisher.publishEvent(new AuditEvent(
+                user.getId(),
+                "LOGIN",
+                "User",
+                user.getId().toString(),
+                "Успешная аутентификация в системе"
+        ));
 
         AuthResponse response = AuthResponse.of(
             user.getId(),
@@ -111,7 +138,19 @@ public class AuthController {
 
     @Operation(summary = "Выход из системы (Logout)")
     @PostMapping("/auth/logout")
-    public ResponseEntity<Map<String, String>> logout() {
+    public ResponseEntity<Map<String, String>> logout(Authentication authentication) {
+        if (authentication != null && authentication.getPrincipal() instanceof String principal) {
+            try {
+                UUID userId = UUID.fromString(principal);
+                eventPublisher.publishEvent(new AuditEvent(
+                        userId,
+                        "LOGOUT",
+                        "User",
+                        userId.toString(),
+                        "Пользователь вышел из системы"
+                ));
+            } catch (Exception ignored) {}
+        }
         return ResponseEntity.ok(Map.of("message", "Сессия успешно завершена"));
     }
 
@@ -145,6 +184,15 @@ public class AuthController {
         }
 
         userRepository.save(user);
+
+        // Аудит обновления профиля
+        eventPublisher.publishEvent(new AuditEvent(
+                userId,
+                "UPDATE_PROFILE",
+                "User",
+                userId.toString(),
+                "Пользователь обновил данные профиля"
+        ));
 
         return ResponseEntity.ok(
                 new UserResponse(user.getId(), user.getEmail(), user.getRole(), user.isBlocked(), user.getCreatedAt())
