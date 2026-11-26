@@ -16,5 +16,5 @@ public interface AttemptRepository extends JpaRepository<Attempt, UUID> {
     Page<Attempt> findByUserId(UUID userId, Pageable pageable);
     Page<Attempt> findByStatus(AttemptStatus status, Pageable pageable);
     Optional<Attempt> findByIdempotencyKey(String idempotencyKey);
-    Optional<Attempt> findByUserIdAndTargetCaseIdAndStatusIn(UUID userId, UUID caseId, List<AttemptStatus> statuses);
+    Optional<Attempt> findFirstByUserIdAndTargetCaseIdAndStatusInOrderByCreatedAtDesc(UUID userId, UUID caseId, List<AttemptStatus> statuses);
 }

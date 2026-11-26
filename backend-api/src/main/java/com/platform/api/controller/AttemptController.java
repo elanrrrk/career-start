@@ -73,7 +73,6 @@ public class AttemptController {
         Case targetCase = caseRepository.findById(caseId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Кейс не найден"));
 
-        // Защита: автор кейса не имеет права решать свой же кейс
         if (targetCase.getAuthor().getId().equals(userId)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Автор не может решать собственный кейс");
         }
@@ -94,7 +93,7 @@ public class AttemptController {
                 AttemptStatus.EXPERT_ANSWER_RECEIVED
         );
 
-        Optional<Attempt> activeAttempt = attemptRepository.findByUserIdAndTargetCaseIdAndStatusIn(userId, caseId, activeStatuses);
+        Optional<Attempt> activeAttempt = attemptRepository.findFirstByUserIdAndTargetCaseIdAndStatusInOrderByCreatedAtDesc(userId, caseId, activeStatuses);
         if (activeAttempt.isPresent()) {
             Attempt existing = activeAttempt.get();
             if (Instant.now().isBefore(existing.getDeadline())) {
@@ -175,7 +174,6 @@ public class AttemptController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Попытка уже завершена ранее");
         }
 
-        // Защита от сдачи пустышек
         boolean hasAnswers = attempt.getAnswers() != null && !attempt.getAnswers().trim().equals("{}") && !attempt.getAnswers().isBlank();
         boolean hasFiles = attempt.getFileUrls() != null && !attempt.getFileUrls().isEmpty();
         if (!hasAnswers && !hasFiles) {
@@ -251,7 +249,6 @@ public class AttemptController {
         TicketMessage msg = new TicketMessage(ticket, attempt.getUser(), MessageSenderRole.CLIENT, req.message());
         messageRepository.save(msg);
 
-        // SSE Push-уведомление назначенному эксперту
         if (ticket.getAssignedExpert() != null) {
             notificationService.sendNotification(
                     ticket.getAssignedExpert().getId(),
