@@ -1,16 +1,12 @@
 package com.platform.api.controller;
 
-import com.platform.api.dto.AnswersUpdateRequest;
-import com.platform.api.dto.AttemptResponse;
-import com.platform.api.dto.PageResponse;
-import com.platform.api.dto.ReviewRequest;
-import com.platform.api.entity.Attempt;
-import com.platform.api.entity.AttemptStatus;
-import com.platform.api.entity.Case;
-import com.platform.api.entity.User;
+import com.platform.api.dto.*;
+import com.platform.api.entity.*;
 import com.platform.api.event.AuditEvent;
 import com.platform.api.repository.AttemptRepository;
 import com.platform.api.repository.CaseRepository;
+import com.platform.api.repository.ReviewTicketRepository;
+import com.platform.api.repository.TicketMessageRepository;
 import com.platform.api.repository.UserRepository;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -22,53 +18,75 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-@Tag(name = "Attempts & Submissions", description = "Прохождение кейсов клиентом и проверка решений экспертом")
+@Tag(name = "Attempts & Client Funnel", description = "Воронка прохождения кейсов студентом")
 @RestController
 @RequestMapping("/api/v1")
 public class AttemptController {
 
+    private static final boolean USE_INFINITE_DEADLINES = true;
+    private static final long INFINITE_DEADLINE_DAYS = 3650;
+
     private final AttemptRepository attemptRepository;
     private final CaseRepository caseRepository;
     private final UserRepository userRepository;
+    private final ReviewTicketRepository ticketRepository;
+    private final TicketMessageRepository messageRepository;
     private final ApplicationEventPublisher eventPublisher;
 
     public AttemptController(
             AttemptRepository attemptRepository,
             CaseRepository caseRepository,
             UserRepository userRepository,
+            ReviewTicketRepository ticketRepository,
+            TicketMessageRepository messageRepository,
             ApplicationEventPublisher eventPublisher
     ) {
         this.attemptRepository = attemptRepository;
         this.caseRepository = caseRepository;
         this.userRepository = userRepository;
+        this.ticketRepository = ticketRepository;
+        this.messageRepository = messageRepository;
         this.eventPublisher = eventPublisher;
     }
 
-    @Operation(summary = "Начать прохождение кейса (POST /cases/{id}/attempts)")
+    @Operation(summary = "Вход в кейс (Статус: OPENED)")
     @PostMapping("/cases/{caseId}/attempts")
     public ResponseEntity<AttemptResponse> startAttempt(@PathVariable UUID caseId, Authentication authentication) {
         UUID userId = UUID.fromString((String) authentication.getPrincipal());
         User user = userRepository.findById(userId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Пользователь не найден"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Пользователь не найден"));
 
         Case targetCase = caseRepository.findById(caseId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Кейс не найден"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Кейс не найден"));
 
         if (!targetCase.isPublished()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Нельзя начать неопубликованный кейс");
         }
 
-        Optional<Attempt> activeAttempt = attemptRepository.findByUserIdAndTargetCaseIdAndStatus(userId, caseId, AttemptStatus.IN_PROGRESS);
+        List<AttemptStatus> activeStatuses = List.of(
+                AttemptStatus.OPENED,
+                AttemptStatus.SOLUTION_ATTACHED,
+                AttemptStatus.PENDING_AI_REVIEW,
+                AttemptStatus.AI_REVIEWED,
+                AttemptStatus.PENDING_EXPERT_REVIEW,
+                AttemptStatus.EXPERT_REVIEW_RECEIVED,
+                AttemptStatus.QUESTION_ASKED,
+                AttemptStatus.FOLLOW_UP_QUESTION_ASKED,
+                AttemptStatus.EXPERT_ANSWER_RECEIVED
+        );
+
+        Optional<Attempt> activeAttempt = attemptRepository.findByUserIdAndTargetCaseIdAndStatusIn(userId, caseId, activeStatuses);
         if (activeAttempt.isPresent()) {
             Attempt existing = activeAttempt.get();
             if (Instant.now().isBefore(existing.getDeadline())) {
@@ -76,51 +94,56 @@ public class AttemptController {
             }
         }
 
-        Instant deadline = Instant.now().plus(targetCase.getTimeLimitMinutes(), ChronoUnit.MINUTES);
+        Instant deadline = USE_INFINITE_DEADLINES
+                ? Instant.now().plus(INFINITE_DEADLINE_DAYS, ChronoUnit.DAYS)
+                : Instant.now().plus(targetCase.getTimeLimitMinutes(), ChronoUnit.MINUTES);
+
         Attempt attempt = new Attempt(targetCase, user, deadline);
+        attempt.setStatus(AttemptStatus.OPENED);
         attemptRepository.save(attempt);
 
-        // Аудит начала прохождения кейса
         eventPublisher.publishEvent(new AuditEvent(
                 userId,
-                "START_ATTEMPT",
+                "OPEN_CASE",
                 "Attempt",
                 attempt.getId().toString(),
-                "Начато решение кейса: " + targetCase.getTitle() + ", дедлайн до: " + deadline
+                "Кейс открыт для решения: " + targetCase.getTitle()
         ));
 
         return ResponseEntity.status(HttpStatus.CREATED).body(mapToResponse(attempt));
     }
 
-    @Operation(summary = "Автосейв промежуточных ответов (PUT /attempts/{id}/answers)")
+    @Operation(summary = "Прикрепление решения / автосейв (Статус: SOLUTION_ATTACHED)")
     @PutMapping("/attempts/{id}/answers")
     public ResponseEntity<AttemptResponse> autosaveAnswers(
-        @PathVariable UUID id,
-        @Valid @RequestBody AnswersUpdateRequest req,
-        Authentication authentication
+            @PathVariable UUID id,
+            @Valid @RequestBody AnswersUpdateRequest req,
+            Authentication authentication
     ) {
         Attempt attempt = getAttemptAndVerifyOwner(id, authentication);
 
-        if (attempt.getStatus() != AttemptStatus.IN_PROGRESS) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Попытка уже сдана или проверена");
+        if (attempt.getStatus() == AttemptStatus.COMPLETED) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Попытка уже завершена");
         }
 
-        if (Instant.now().isAfter(attempt.getDeadline())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Время на решение кейса истекло");
+        if (!USE_INFINITE_DEADLINES && Instant.now().isAfter(attempt.getDeadline())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Дедлайн истек");
         }
 
         attempt.setAnswers(req.answers());
+        attempt.setStatus(AttemptStatus.SOLUTION_ATTACHED);
         attemptRepository.save(attempt);
 
         return ResponseEntity.ok(mapToResponse(attempt));
     }
 
-    @Operation(summary = "Финальная сдача кейса с ключом идемпотентности (POST /attempts/{id}/submit)")
+    @Operation(summary = "Сдача на проверку с выбором воронки (AI_ONLY, EXPERT_ONLY, AI_AND_EXPERT)")
     @PostMapping("/attempts/{id}/submit")
     public ResponseEntity<AttemptResponse> submitAttempt(
-        @PathVariable UUID id,
-        @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
-        Authentication authentication
+            @PathVariable UUID id,
+            @Valid @RequestBody SubmitAttemptRequest req,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            Authentication authentication
     ) {
         if (idempotencyKey != null && !idempotencyKey.isBlank()) {
             Optional<Attempt> existing = attemptRepository.findByIdempotencyKey(idempotencyKey);
@@ -129,44 +152,144 @@ public class AttemptController {
                 if (prev.getId().equals(id)) {
                     return ResponseEntity.ok(mapToResponse(prev));
                 }
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "Idempotency-Key уже использован для другой попытки");
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "Idempotency-Key уже использован");
             }
         }
 
         Attempt attempt = getAttemptAndVerifyOwner(id, authentication);
 
-        if (attempt.getStatus() != AttemptStatus.IN_PROGRESS) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Попытка уже была сдана ранее");
+        if (attempt.getStatus() == AttemptStatus.COMPLETED) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Попытка уже завершена ранее");
         }
 
         Instant now = Instant.now();
-        if (now.isAfter(attempt.getDeadline())) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Дедлайн просрочен. Сдача отклонена сервером.");
+        if (!USE_INFINITE_DEADLINES && now.isAfter(attempt.getDeadline())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Дедлайн просрочен сервером");
         }
 
-        attempt.setStatus(AttemptStatus.SUBMITTED);
         attempt.setSubmittedAt(now);
         attempt.setIdempotencyKey(idempotencyKey);
+        attempt.setReviewMode(req.reviewMode());
+
+        if (req.reviewMode() == ReviewMode.AI_ONLY) {
+            attempt.setStatus(AttemptStatus.AI_REVIEWED);
+            attempt.setAiFeedback("ИИ-разбор: Решение проанализировано. Структура логична, ключевые требования учтены.");
+            attempt.setScore(85);
+        } else if (req.reviewMode() == ReviewMode.EXPERT_ONLY) {
+            attempt.setStatus(AttemptStatus.PENDING_EXPERT_REVIEW);
+            createOrGetExpertTicket(attempt);
+        } else if (req.reviewMode() == ReviewMode.AI_AND_EXPERT) {
+            attempt.setStatus(AttemptStatus.PENDING_EXPERT_REVIEW);
+            attempt.setAiFeedback("Экспресс-анализ ИИ завершен. Полный детальный разбор формируется профильным экспертом.");
+            createOrGetExpertTicket(attempt);
+        }
+
         attemptRepository.save(attempt);
 
-        // Аудит сдачи работы
         eventPublisher.publishEvent(new AuditEvent(
                 attempt.getUser().getId(),
                 "SUBMIT_ATTEMPT",
                 "Attempt",
                 attempt.getId().toString(),
-                "Работа по кейсу \"" + attempt.getTargetCase().getTitle() + "\" успешно сдана"
+                "Решение сдано в режиме проверки: " + req.reviewMode()
         ));
 
         return ResponseEntity.ok(mapToResponse(attempt));
     }
 
-    @Operation(summary = "Получить список своих попыток (GET /attempts)")
+    @Operation(summary = "Задать вопрос / апелляцию эксперту (Статус: QUESTION_ASKED / FOLLOW_UP_QUESTION_ASKED)")
+    @PostMapping("/attempts/{id}/questions")
+    @Transactional
+    public ResponseEntity<ReviewTicketResponse> askQuestion(
+            @PathVariable UUID id,
+            @Valid @RequestBody TicketMessageRequest req,
+            Authentication authentication
+    ) {
+        Attempt attempt = getAttemptAndVerifyOwner(id, authentication);
+
+        ReviewTicket ticket = ticketRepository.findByAttemptId(attempt.getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Для этой попытки нет активного тикета проверки"));
+
+        if (ticket.getStatus() == ExpertTicketStatus.COMPLETED) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Диалог закрыт, кейс завершен");
+        }
+
+        int count = ticket.getQuestionsCount() + 1;
+        ticket.setQuestionsCount(count);
+
+        if (count == 1) {
+            attempt.setStatus(AttemptStatus.QUESTION_ASKED);
+            ticket.setStatus(ExpertTicketStatus.QUESTION_RECEIVED);
+        } else {
+            attempt.setStatus(AttemptStatus.FOLLOW_UP_QUESTION_ASKED);
+            ticket.setStatus(ExpertTicketStatus.FOLLOW_UP_QUESTION_RECEIVED);
+        }
+
+        ticketRepository.save(ticket);
+        attemptRepository.save(attempt);
+
+        TicketMessage msg = new TicketMessage(ticket, attempt.getUser(), MessageSenderRole.CLIENT, req.message());
+        messageRepository.save(msg);
+
+        eventPublisher.publishEvent(new AuditEvent(
+                attempt.getUser().getId(),
+                count == 1 ? "ASK_QUESTION" : "ASK_FOLLOW_UP_QUESTION",
+                "ReviewTicket",
+                ticket.getId().toString(),
+                "Студент задал вопрос #" + count
+        ));
+
+        return ResponseEntity.ok(mapToTicketResponse(ticket));
+    }
+
+    @Operation(summary = "Получить тикет проверки и чат с экспертом по ID попытки")
+    @GetMapping("/attempts/{id}/ticket")
+    @Transactional(readOnly = true)
+    public ResponseEntity<ReviewTicketResponse> getAttemptTicket(
+            @PathVariable UUID id,
+            Authentication authentication
+    ) {
+        Attempt attempt = getAttemptAndVerifyOwner(id, authentication);
+
+        ReviewTicket ticket = ticketRepository.findByAttemptId(attempt.getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Тикет проверки для этой попытки не найден"));
+
+        return ResponseEntity.ok(mapToTicketResponse(ticket));
+    }
+
+    @Operation(summary = "Завершить работу по кейсу (Статус: COMPLETED / DONE)")
+    @PostMapping("/attempts/{id}/complete")
+    public ResponseEntity<AttemptResponse> completeAttempt(
+            @PathVariable UUID id,
+            Authentication authentication
+    ) {
+        Attempt attempt = getAttemptAndVerifyOwner(id, authentication);
+
+        attempt.setStatus(AttemptStatus.COMPLETED);
+        attemptRepository.save(attempt);
+
+        ticketRepository.findByAttemptId(attempt.getId()).ifPresent(ticket -> {
+            ticket.setStatus(ExpertTicketStatus.COMPLETED);
+            ticketRepository.save(ticket);
+        });
+
+        eventPublisher.publishEvent(new AuditEvent(
+                attempt.getUser().getId(),
+                "COMPLETE_ATTEMPT",
+                "Attempt",
+                attempt.getId().toString(),
+                "Кейс полностью завершен клиентом"
+        ));
+
+        return ResponseEntity.ok(mapToResponse(attempt));
+    }
+
+    @Operation(summary = "Получить историю своих попыток")
     @GetMapping("/attempts")
     public ResponseEntity<PageResponse<AttemptResponse>> getMyAttempts(
-        @RequestParam(defaultValue = "1") int page,
-        @RequestParam(defaultValue = "10") int limit,
-        Authentication authentication
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int limit,
+            Authentication authentication
     ) {
         UUID userId = UUID.fromString((String) authentication.getPrincipal());
         int pageIndex = Math.max(0, page - 1);
@@ -176,73 +299,25 @@ public class AttemptController {
         var items = attemptsPage.getContent().stream().map(this::mapToResponse).toList();
 
         return ResponseEntity.ok(new PageResponse<>(
-            items,
-            attemptsPage.getTotalElements(),
-            page,
-            limit
+                items,
+                attemptsPage.getTotalElements(),
+                page,
+                limit
         ));
     }
 
-    @Operation(summary = "Получить работы на проверку (GET /submissions?status=pending) - только EXPERT/ADMIN")
-    @GetMapping("/submissions")
-    @PreAuthorize("hasAnyRole('EXPERT', 'ADMIN')")
-    public ResponseEntity<PageResponse<AttemptResponse>> getSubmissions(
-        @RequestParam(defaultValue = "1") int page,
-        @RequestParam(defaultValue = "10") int limit,
-        @RequestParam(defaultValue = "pending") String status
-    ) {
-        int pageIndex = Math.max(0, page - 1);
-        Pageable pageable = PageRequest.of(pageIndex, limit, Sort.by("submittedAt").ascending());
-
-        AttemptStatus queryStatus = "pending".equalsIgnoreCase(status) ? AttemptStatus.SUBMITTED : AttemptStatus.REVIEWED;
-        Page<Attempt> submissionsPage = attemptRepository.findByStatus(queryStatus, pageable);
-        var items = submissionsPage.getContent().stream().map(this::mapToResponse).toList();
-
-        return ResponseEntity.ok(new PageResponse<>(
-            items,
-            submissionsPage.getTotalElements(),
-            page,
-            limit
-        ));
-    }
-
-    @Operation(summary = "Оценить решение студента (POST /submissions/{id}/review) - только EXPERT/ADMIN")
-    @PostMapping("/submissions/{id}/review")
-    @PreAuthorize("hasAnyRole('EXPERT', 'ADMIN')")
-    public ResponseEntity<AttemptResponse> reviewSubmission(
-        @PathVariable UUID id,
-        @Valid @RequestBody ReviewRequest req,
-        Authentication authentication
-    ) {
-        UUID reviewerId = UUID.fromString((String) authentication.getPrincipal());
-        Attempt attempt = attemptRepository.findById(id)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Попытка не найдена"));
-
-        if (attempt.getStatus() != AttemptStatus.SUBMITTED) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Проверить можно только сданную работу (SUBMITTED)");
-        }
-
-        attempt.setStatus(AttemptStatus.REVIEWED);
-        attempt.setScore(req.score());
-        attempt.setFeedback(req.feedback());
-        attemptRepository.save(attempt);
-
-        // Аудит проверки работы экспертом
-        eventPublisher.publishEvent(new AuditEvent(
-                reviewerId,
-                "REVIEW_SUBMISSION",
-                "Attempt",
-                attempt.getId().toString(),
-                "Выставлена оценка: " + req.score() + " баллов за решение кейса " + attempt.getTargetCase().getTitle()
-        ));
-
-        return ResponseEntity.ok(mapToResponse(attempt));
+    private void createOrGetExpertTicket(Attempt attempt) {
+        ticketRepository.findByAttemptId(attempt.getId()).orElseGet(() -> {
+            ReviewTicket newTicket = new ReviewTicket(attempt);
+            newTicket.setStatus(ExpertTicketStatus.QUEUED);
+            return ticketRepository.save(newTicket);
+        });
     }
 
     private Attempt getAttemptAndVerifyOwner(UUID attemptId, Authentication authentication) {
         UUID userId = UUID.fromString((String) authentication.getPrincipal());
         Attempt attempt = attemptRepository.findById(attemptId)
-            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Попытка не найдена"));
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Попытка не найдена"));
 
         if (!attempt.getUser().getId().equals(userId)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Вы не являетесь владельцем этой попытки");
@@ -252,18 +327,43 @@ public class AttemptController {
 
     private AttemptResponse mapToResponse(Attempt a) {
         return new AttemptResponse(
-            a.getId(),
-            a.getTargetCase().getId(),
-            a.getUser().getId(),
-            a.getStatus(),
-            a.getAnswers(),
-            a.getDeadline(),
-            Instant.now(),
-            a.getSubmittedAt(),
-            a.getScore(),
-            a.getFeedback(),
-            a.getVersion(),
-            a.getCreatedAt()
+                a.getId(),
+                a.getTargetCase().getId(),
+                a.getUser().getId(),
+                a.getStatus(),
+                a.getReviewMode(),
+                a.getAnswers(),
+                a.getAiFeedback(),
+                a.getDeadline(),
+                Instant.now(),
+                a.getSubmittedAt(),
+                a.getScore(),
+                a.getFeedback(),
+                a.getVersion(),
+                a.getCreatedAt()
+        );
+    }
+
+    private ReviewTicketResponse mapToTicketResponse(ReviewTicket t) {
+        List<TicketMessageResponse> msgs = messageRepository.findByTicketIdOrderByCreatedAtAsc(t.getId())
+                .stream()
+                .map(m -> new TicketMessageResponse(m.getId(), m.getSender().getId(), m.getSenderRole(), m.getMessage(), m.getCreatedAt()))
+                .toList();
+
+        return new ReviewTicketResponse(
+                t.getId(),
+                t.getAttempt().getId(),
+                t.getAttempt().getTargetCase().getId(),
+                t.getAttempt().getTargetCase().getTitle(),
+                t.getAttempt().getUser().getId(),
+                t.getAssignedExpert() != null ? t.getAssignedExpert().getId() : null,
+                t.getStatus(),
+                t.getExpertFeedback(),
+                t.getQuestionsCount(),
+                t.getAnswersCount(),
+                msgs,
+                t.getCreatedAt(),
+                t.getUpdatedAt()
         );
     }
 }

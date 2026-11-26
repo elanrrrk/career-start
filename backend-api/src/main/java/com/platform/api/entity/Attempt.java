@@ -22,13 +22,18 @@ public class Attempt {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 50)
-    private AttemptStatus status = AttemptStatus.IN_PROGRESS;
+    private AttemptStatus status = AttemptStatus.OPENED;
 
-    // Хранение ответов в формате JSONB
+    @Enumerated(EnumType.STRING)
+    @Column(length = 30)
+    private ReviewMode reviewMode;
+
     @Column(nullable = false, columnDefinition = "TEXT")
     private String answers = "{}";
 
-    // Ключ идемпотентности по ТЗ для исключения повторных списаний/отправок
+    @Column(columnDefinition = "TEXT")
+    private String aiFeedback;
+
     @Column(unique = true)
     private String idempotencyKey;
 
@@ -65,7 +70,6 @@ public class Attempt {
         this.updatedAt = Instant.now();
     }
 
-    // Геттеры и сеттеры
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }
 
@@ -78,8 +82,14 @@ public class Attempt {
     public AttemptStatus getStatus() { return status; }
     public void setStatus(AttemptStatus status) { this.status = status; }
 
+    public ReviewMode getReviewMode() { return reviewMode; }
+    public void setReviewMode(ReviewMode reviewMode) { this.reviewMode = reviewMode; }
+
     public String getAnswers() { return answers; }
     public void setAnswers(String answers) { this.answers = answers; }
+
+    public String getAiFeedback() { return aiFeedback; }
+    public void setAiFeedback(String aiFeedback) { this.aiFeedback = aiFeedback; }
 
     public String getIdempotencyKey() { return idempotencyKey; }
     public void setIdempotencyKey(String idempotencyKey) { this.idempotencyKey = idempotencyKey; }
