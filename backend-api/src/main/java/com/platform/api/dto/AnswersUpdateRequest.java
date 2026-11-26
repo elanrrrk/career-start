@@ -1,8 +1,8 @@
 package com.platform.api.dto;
 
-import jakarta.validation.constraints.NotNull;
+import java.util.List;
 
-// Автосейв ответов клиента
 public record AnswersUpdateRequest(
-    @NotNull String answers
+        String answers,
+        List<String> fileUrls
 ) {}

@@ -11,6 +11,7 @@ import com.platform.api.repository.AttemptRepository;
 import com.platform.api.repository.ReviewTicketRepository;
 import com.platform.api.repository.TicketMessageRepository;
 import com.platform.api.repository.UserRepository;
+import com.platform.api.service.NotificationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -40,6 +41,7 @@ public class ExpertTicketController {
     private final TicketMessageRepository messageRepository;
     private final UserRepository userRepository;
     private final AttemptRepository attemptRepository;
+    private final NotificationService notificationService;
     private final ApplicationEventPublisher eventPublisher;
 
     public ExpertTicketController(
@@ -47,12 +49,14 @@ public class ExpertTicketController {
             TicketMessageRepository messageRepository,
             UserRepository userRepository,
             AttemptRepository attemptRepository,
+            NotificationService notificationService,
             ApplicationEventPublisher eventPublisher
     ) {
         this.ticketRepository = ticketRepository;
         this.messageRepository = messageRepository;
         this.userRepository = userRepository;
         this.attemptRepository = attemptRepository;
+        this.notificationService = notificationService;
         this.eventPublisher = eventPublisher;
     }
 
@@ -114,6 +118,11 @@ public class ExpertTicketController {
         ReviewTicket ticket = ticketRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Тикет не найден"));
 
+        // Защита: эксперт не может проверять свою же работу
+        if (ticket.getAttempt().getUser().getId().equals(expertId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Вы не можете проверять собственное решение");
+        }
+
         if (ticket.getStatus() != ExpertTicketStatus.QUEUED) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Заявку можно взять в работу только из статуса QUEUED");
         }
@@ -146,6 +155,7 @@ public class ExpertTicketController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "В очередь можно вернуть только заявку в статусе IN_PROGRESS");
         }
 
+        // Защита BOLA
         if (ticket.getAssignedExpert() != null && !ticket.getAssignedExpert().getId().equals(expertId)) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Заявку может вернуть только назначенный эксперт");
         }
@@ -178,6 +188,11 @@ public class ExpertTicketController {
         ReviewTicket ticket = ticketRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Тикет не найден"));
 
+        // Защита BOLA: оценивать может только назначенный эксперт
+        if (ticket.getAssignedExpert() == null || !ticket.getAssignedExpert().getId().equals(expertId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Оценивать работу может только назначенный эксперт");
+        }
+
         if (ticket.getStatus() != ExpertTicketStatus.IN_PROGRESS) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Оценку можно отправить только для заявки со статусом IN_PROGRESS");
         }
@@ -191,6 +206,13 @@ public class ExpertTicketController {
         attempt.setScore(req.score());
         attempt.setFeedback(req.feedback());
         attemptRepository.save(attempt);
+
+        // SSE Push-уведомление студенту о готовности проверки
+        notificationService.sendNotification(
+                attempt.getUser().getId(),
+                "REVIEW_RECEIVED",
+                "Эксперт проверил вашу работу по кейсу " + attempt.getTargetCase().getTitle() + ". Баллы: " + req.score()
+        );
 
         eventPublisher.publishEvent(new AuditEvent(
                 expertId,
@@ -218,6 +240,11 @@ public class ExpertTicketController {
         ReviewTicket ticket = ticketRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Тикет не найден"));
 
+        // Защита BOLA: отвечать на апелляцию может только назначенный эксперт
+        if (ticket.getAssignedExpert() == null || !ticket.getAssignedExpert().getId().equals(expertId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Отвечать на вопрос может только назначенный эксперт");
+        }
+
         if (ticket.getStatus() != ExpertTicketStatus.QUESTION_RECEIVED &&
             ticket.getStatus() != ExpertTicketStatus.FOLLOW_UP_QUESTION_RECEIVED) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Ответить можно только при наличии входящего вопроса");
@@ -240,6 +267,13 @@ public class ExpertTicketController {
 
         TicketMessage msg = new TicketMessage(ticket, expert, MessageSenderRole.EXPERT, req.message());
         messageRepository.save(msg);
+
+        // SSE Push-уведомление студенту об ответе на апелляцию
+        notificationService.sendNotification(
+                attempt.getUser().getId(),
+                "ANSWER_RECEIVED",
+                "Эксперт ответил на ваш вопрос по кейсу " + attempt.getTargetCase().getTitle()
+        );
 
         eventPublisher.publishEvent(new AuditEvent(
                 expertId,

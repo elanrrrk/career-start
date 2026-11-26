@@ -3,11 +3,8 @@ package com.platform.api.controller;
 import com.platform.api.dto.*;
 import com.platform.api.entity.*;
 import com.platform.api.event.AuditEvent;
-import com.platform.api.repository.AttemptRepository;
-import com.platform.api.repository.CaseRepository;
-import com.platform.api.repository.ReviewTicketRepository;
-import com.platform.api.repository.TicketMessageRepository;
-import com.platform.api.repository.UserRepository;
+import com.platform.api.repository.*;
+import com.platform.api.service.NotificationService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -42,6 +39,8 @@ public class AttemptController {
     private final UserRepository userRepository;
     private final ReviewTicketRepository ticketRepository;
     private final TicketMessageRepository messageRepository;
+    private final ExpertReviewRatingRepository ratingRepository;
+    private final NotificationService notificationService;
     private final ApplicationEventPublisher eventPublisher;
 
     public AttemptController(
@@ -50,6 +49,8 @@ public class AttemptController {
             UserRepository userRepository,
             ReviewTicketRepository ticketRepository,
             TicketMessageRepository messageRepository,
+            ExpertReviewRatingRepository ratingRepository,
+            NotificationService notificationService,
             ApplicationEventPublisher eventPublisher
     ) {
         this.attemptRepository = attemptRepository;
@@ -57,6 +58,8 @@ public class AttemptController {
         this.userRepository = userRepository;
         this.ticketRepository = ticketRepository;
         this.messageRepository = messageRepository;
+        this.ratingRepository = ratingRepository;
+        this.notificationService = notificationService;
         this.eventPublisher = eventPublisher;
     }
 
@@ -69,6 +72,11 @@ public class AttemptController {
 
         Case targetCase = caseRepository.findById(caseId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Кейс не найден"));
+
+        // Защита: автор кейса не имеет права решать свой же кейс
+        if (targetCase.getAuthor().getId().equals(userId)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Автор не может решать собственный кейс");
+        }
 
         if (!targetCase.isPublished()) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Нельзя начать неопубликованный кейс");
@@ -113,7 +121,7 @@ public class AttemptController {
         return ResponseEntity.status(HttpStatus.CREATED).body(mapToResponse(attempt));
     }
 
-    @Operation(summary = "Прикрепление решения / автосейв (Статус: SOLUTION_ATTACHED)")
+    @Operation(summary = "Прикрепление решения и файлов / автосейв (Статус: SOLUTION_ATTACHED)")
     @PutMapping("/attempts/{id}/answers")
     public ResponseEntity<AttemptResponse> autosaveAnswers(
             @PathVariable UUID id,
@@ -130,7 +138,12 @@ public class AttemptController {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Дедлайн истек");
         }
 
-        attempt.setAnswers(req.answers());
+        if (req.answers() != null) {
+            attempt.setAnswers(req.answers());
+        }
+        if (req.fileUrls() != null) {
+            attempt.setFileUrls(req.fileUrls());
+        }
         attempt.setStatus(AttemptStatus.SOLUTION_ATTACHED);
         attemptRepository.save(attempt);
 
@@ -160,6 +173,13 @@ public class AttemptController {
 
         if (attempt.getStatus() == AttemptStatus.COMPLETED) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Попытка уже завершена ранее");
+        }
+
+        // Защита от сдачи пустышек
+        boolean hasAnswers = attempt.getAnswers() != null && !attempt.getAnswers().trim().equals("{}") && !attempt.getAnswers().isBlank();
+        boolean hasFiles = attempt.getFileUrls() != null && !attempt.getFileUrls().isEmpty();
+        if (!hasAnswers && !hasFiles) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Нельзя сдать пустую работу. Прикрепите решение или файлы.");
         }
 
         Instant now = Instant.now();
@@ -231,6 +251,15 @@ public class AttemptController {
         TicketMessage msg = new TicketMessage(ticket, attempt.getUser(), MessageSenderRole.CLIENT, req.message());
         messageRepository.save(msg);
 
+        // SSE Push-уведомление назначенному эксперту
+        if (ticket.getAssignedExpert() != null) {
+            notificationService.sendNotification(
+                    ticket.getAssignedExpert().getId(),
+                    "NEW_QUESTION",
+                    "Студент задал вопрос по кейсу " + attempt.getTargetCase().getTitle()
+            );
+        }
+
         eventPublisher.publishEvent(new AuditEvent(
                 attempt.getUser().getId(),
                 count == 1 ? "ASK_QUESTION" : "ASK_FOLLOW_UP_QUESTION",
@@ -240,6 +269,60 @@ public class AttemptController {
         ));
 
         return ResponseEntity.ok(mapToTicketResponse(ticket));
+    }
+
+    @Operation(summary = "Оценить работу эксперта после завершения кейса (CSAT Rating 1-5)")
+    @PostMapping("/attempts/{id}/rate-expert")
+    @Transactional
+    public ResponseEntity<ExpertReviewRatingResponse> rateExpert(
+            @PathVariable UUID id,
+            @Valid @RequestBody RateExpertRequest req,
+            Authentication authentication
+    ) {
+        Attempt attempt = getAttemptAndVerifyOwner(id, authentication);
+
+        if (attempt.getStatus() != AttemptStatus.COMPLETED) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Оценить эксперта можно только после завершения кейса (COMPLETED)");
+        }
+
+        ReviewTicket ticket = ticketRepository.findByAttemptId(attempt.getId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Тикет проверки не найден"));
+
+        if (ticket.getAssignedExpert() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "У этой попытки не было назначенного эксперта");
+        }
+
+        if (ratingRepository.existsByTicketId(ticket.getId())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, "Вы уже оценили работу эксперта по этому кейсу");
+        }
+
+        ExpertReviewRating rating = new ExpertReviewRating(
+                ticket,
+                attempt.getUser(),
+                ticket.getAssignedExpert(),
+                req.score(),
+                req.comment()
+        );
+        ratingRepository.save(rating);
+
+        eventPublisher.publishEvent(new AuditEvent(
+                attempt.getUser().getId(),
+                "RATE_EXPERT",
+                "ExpertReviewRating",
+                rating.getId().toString(),
+                "Студент оценил эксперта на " + req.score() + " звезд"
+        ));
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(
+                new ExpertReviewRatingResponse(
+                        rating.getId(),
+                        ticket.getId(),
+                        ticket.getAssignedExpert().getId(),
+                        rating.getScore(),
+                        rating.getComment(),
+                        rating.getCreatedAt()
+                )
+        );
     }
 
     @Operation(summary = "Получить тикет проверки и чат с экспертом по ID попытки")
@@ -333,6 +416,7 @@ public class AttemptController {
                 a.getStatus(),
                 a.getReviewMode(),
                 a.getAnswers(),
+                a.getFileUrls(),
                 a.getAiFeedback(),
                 a.getDeadline(),
                 Instant.now(),

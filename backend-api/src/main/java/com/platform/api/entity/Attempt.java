@@ -2,6 +2,8 @@ package com.platform.api.entity;
 
 import jakarta.persistence.*;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 @Entity
@@ -30,6 +32,11 @@ public class Attempt {
 
     @Column(nullable = false, columnDefinition = "TEXT")
     private String answers = "{}";
+
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "attempt_files", joinColumns = @JoinColumn(name = "attempt_id"))
+    @Column(name = "file_url")
+    private List<String> fileUrls = new ArrayList<>();
 
     @Column(columnDefinition = "TEXT")
     private String aiFeedback;
@@ -87,6 +94,9 @@ public class Attempt {
 
     public String getAnswers() { return answers; }
     public void setAnswers(String answers) { this.answers = answers; }
+
+    public List<String> getFileUrls() { return fileUrls; }
+    public void setFileUrls(List<String> fileUrls) { this.fileUrls = fileUrls; }
 
     public String getAiFeedback() { return aiFeedback; }
     public void setAiFeedback(String aiFeedback) { this.aiFeedback = aiFeedback; }
